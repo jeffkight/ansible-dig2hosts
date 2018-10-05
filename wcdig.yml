@@ -1,0 +1,98 @@
+#
+# (c) Copyright 2018 Jeff Kight
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+#
+# Author: Jeff Kight <jeff@kight.net>
+#
+---
+
+- hosts: localhost
+  gather_facts: no
+  connection: local
+
+  vars:
+    marker: "DIG AXFR"
+
+  tasks:
+
+    - name: get dig axfr via delegate
+      shell: dig axfr {{ domain }} | grep -v -e '^;' | grep -v -e '^_' | grep -v -e '^$' | sed -e 's/\t/ /g' -e 's/  / /g'
+      register: dig_axfr_delegate_result
+      delegate_to: "{{ delegate }}"
+      when: delegate is defined
+
+    - name: set_fact when delegate
+      set_fact:
+        dig_axfr_result: "{{ dig_axfr_delegate_result }}"
+      when: delegate is defined
+
+    - name: get dig axfr locally
+      shell: dig axfr {{ domain }} | grep -v -e '^;' | grep -v -e '^_' | grep -v -e '^$' | sed -e 's/\t/ /g' -e 's/  / /g'
+      register: dig_axfr_local_result
+      when: delegate is not defined
+
+    - name: set_fact when local
+      set_fact:
+        dig_axfr_result: "{{ dig_axfr_local_result }}"
+      when: delegate is not defined
+
+    - name: check details
+      debug:
+        var: dig_axfr_result
+        verbosity: 1
+
+    - name: create dictionary from dig axfr
+      set_fact:
+        dig_axfr: >
+          {{ dig_axfr|default([]) + [ { 'hostname': item.split(' ')[0]|default(), 'type':  item.split(' ')[3]|default(),  'value':  item.split(' ')[4]|default() } ] }}
+      loop: "{{ dig_axfr_result.stdout_lines|flatten(levels=1) }}"
+      loop_control:
+        label: "{{ item.split(' ')[0] }}"
+
+    - name: check details
+      debug:
+        var: dig_axfr
+        verbosity: 1
+
+    - name: filter dictionary on type A
+      set_fact:
+        dig_axfr_A: "{{ dig_axfr_A|default([]) + [ item ] }}"
+      loop: "{{ dig_axfr|json_query('[?type==`A`]') }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: check details
+      debug:
+        var: dig_axfr_A
+        verbosity: 1
+
+    - name: create host entries
+      set_fact:
+        host_entries: "{{ host_entries|default([]) }} + [ '{{ item.value }}\t{{ item.hostname|regex_replace('\\..*', '') }} {{ item.hostname|regex_replace('.hqplan.lab\\.', '.hqplan.lab') }}' ]"
+      loop: "{{ dig_axfr_A|flatten(levels=1) }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: check details
+      debug:
+        msg: "{{ host_entries }}"
+        verbosity: 1
+
+    - name: manage hosts
+      blockinfile:
+        path: /etc/hosts
+        block: "{{ host_entries|join('\n') }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK for {{ marker }}"
+      become: yes
