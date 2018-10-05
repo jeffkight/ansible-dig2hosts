@@ -22,9 +22,6 @@
   gather_facts: no
   connection: local
 
-  vars:
-    marker: "DIG AXFR"
-
   tasks:
 
     - name: get dig axfr via delegate
@@ -94,5 +91,5 @@
       blockinfile:
         path: /etc/hosts
         block: "{{ host_entries|join('\n') }}"
-        marker: "# {mark} ANSIBLE MANAGED BLOCK for {{ marker }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR {{ domain|upper }}"
       become: yes
